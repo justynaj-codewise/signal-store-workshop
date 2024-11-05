@@ -7,16 +7,22 @@ import { AlbumListComponent } from './album-list/album-list.component';
 import {patchState, signalState} from "@ngrx/signals";
 import {AlbumsService} from "@/albums/albums.service";
 import { MatSnackBar } from '@angular/material/snack-bar';
+import {MatButton} from "@angular/material/button";
+import {rxMethod} from "@ngrx/signals/rxjs-interop";
+import { exhaustMap, pipe, tap} from "rxjs";
+import {tapResponse} from "@ngrx/operators";
 
 @Component({
   selector: 'ngrx-album-search',
   standalone: true,
-  imports: [ProgressBarComponent, AlbumFilterComponent, AlbumListComponent],
+  imports: [ProgressBarComponent, AlbumFilterComponent, AlbumListComponent, MatButton],
   template: `
     <ngrx-progress-bar [showProgress]="searchState.showProgress()" />
 
     <div class="container">
       <h1>Albums ({{ totalAlbums() }})</h1>
+
+      <button mat-raised-button color="primary" (click)="refreshAlbums()">Refresh</button>
 
       <ngrx-album-filter
         [query]="searchState.query()"
@@ -46,33 +52,70 @@ export default class AlbumSearchComponent implements OnInit {
   showSpinner = computed(() => this.searchState.showProgress() && this.searchState.albums().length === 0);
 
   ngOnInit() {
-    patchState(this.searchState, { showProgress: true });
-    this.albumsService.getAll().subscribe({
-      next: (albums) => {
-        patchState(this.searchState, { albums, showProgress: false });
-      },
-      error: (error) => {
-        console.error('Error loading albums:', error);
-        patchState(this.searchState, { showProgress: false });
+    this.loadAllAlbums();
+  }
 
-        this.snackBar.open(error.message, 'Close', {
-          duration: 5000,
-        });
-      },
-    });
+  refreshAlbums(): void {
+    this.loadAllAlbums();
   }
 
   updateQuery(query: string): void {
     // console.log('updateQuery', query);
-    patchState(this.searchState, { query });
+    patchState(this.searchState, {query});
   }
 
   updateOrder(order: SortOrder): void {
     // console.log('updateOrder', order);
-    patchState(this.searchState, { order });
+    patchState(this.searchState, {order});
   }
-}
 
+  // readonly logDoubledNumber = rxMethod<number>(
+  //   pipe(
+  //     map((num) => num * 2),
+  //     tap((doubledNum) => console.log(doubledNum)),
+  //   ),
+  // );
+
+  // readonly loadAllAlbums = rxMethod<void>(
+  //   pipe(
+  //     tap(() => patchState(this.searchState, {showProgress: true})),
+  //     exhaustMap(() =>
+  //       this.albumsService.getAll().pipe(
+  //         tap((albums) => {
+  //           patchState(this.searchState, {albums, showProgress: false});
+  //         }),
+  //         catchError((error: { message: string }) => {
+  //           patchState(this.searchState, {showProgress: false});
+  //           this.snackBar.open(error.message, 'Close', {duration: 5_000});
+  //           return EMPTY;
+  //         }),
+  //       )
+  //     ),
+  //   ),
+  // );
+
+
+  readonly loadAllAlbums = rxMethod<void>(
+    pipe(
+      tap(() => patchState(this.searchState, {showProgress: true})),
+      exhaustMap(() => {
+        return this.albumsService.getAll().pipe(
+          tapResponse({
+            next: (albums) => {
+              patchState(this.searchState, {albums, showProgress: false});
+            },
+            error: (error: { message: string }) => {
+              this.snackBar.open(error.message, 'Close', {duration: 5_000});
+              patchState(this.searchState, {showProgress: false});
+            },
+          }),
+        );
+      }),
+    ),
+  );
+
+
+}
 
 type SearchState = {
   albums: Album[];
@@ -94,3 +137,10 @@ type SearchState = {
 // Inject `AlbumsService` and use the `getAll` method to fetch all albums from the API when `AlbumSearchComponent` is initialized.
 // 💡 Set `showProgress` to false when the request succeeds or fails.
 // 💡 Use `MatSnackBar` to show an error when the request fails.
+
+// Milestone 02: RxMethod
+// Create reactive method `loadAllAlbums` by using the `rxMethod` function that fetches all albums from the API.
+// 💡 Use `exhaustMap` to prevent parallel calls when the reactive method is called multiple times.
+// 💡 Use the `tapResponse` operator from the `@ngrx/operators` package to keep the reactive method subscription alive if the request fails.
+//   Invoke the `loadAllAlbums` method when `AlbumSearchComponent` is initialized.
+
